@@ -1,0 +1,2 @@
+build:
+	pip install --editable .
