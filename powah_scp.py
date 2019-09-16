@@ -5,10 +5,16 @@ import click
 
 import os
 import re
+
+# Learn about the amazing query language for json structures.
+# http://jmespath.org/tutorial.html
 import jmespath
 from pathlib import Path
 
+# Instance ID's are either 8 or 17 characters long, after the i- part.
 INST_ID_REGEX = r'(^i-(\w{17}|\w{8}))\W(.+)'
+
+APP_NAME = 'ec2scp'
 
 
 def get_instance_info(instance_id):
@@ -27,11 +33,13 @@ def get_instance_info(instance_id):
         image_desc = jmespath.search('Images[*].Description', response2)[0]
 
         if 'Windows' in image_desc:
-            click.Abort('EC2 Instance is running windows.')
+            clich.echo('EC2 Instance is running windows.')
+            click.Abort()
 
         os_user = 'ubuntu' if 'Ubuntu' in image_desc else 'ec2-user'
-    except (ClientError) as e:
-        raise e
+    except ClientError as e:
+        click.echo(f'AWS client failed: {e}')
+        click.Abort()
 
     d.update({'user': os_user})
     return d
@@ -79,7 +87,7 @@ def resolve_instance_info_and_paths(src, dst):
     return instance_info, src_path, dst_path
 
 
-@click.command()
+@app.command()
 @click.argument('src', type=click.STRING)
 @click.argument('dst', type=click.STRING)
 def scp(src, dst):
@@ -98,7 +106,7 @@ def scp(src, dst):
     public_key = Path.home() / '.ssh/id_rsa.pub'
 
     if not public_key.exists():
-        click.echo('Public rsa key not found. Please generate one with ssh-keygen XXX.')
+        click.echo('Rsa key not found. Please generate one with: ssh-keygen -t rsa -f id_rsa.')
         click.Abort()
 
     public_key = public_key.read_text()
@@ -113,5 +121,73 @@ def scp(src, dst):
     os.system(args)
 
 
+@app.command()
+def create_mssh_config(perm):
+    ''' For each availble EC2 instance, export enviroment variables
+        $INSTANCE_NAME=INSTANCE_ID
+        to enable referencing instances via their name in all commands,
+        and not their instance id. Aliases are added to a configfile, which
+        is sourced in your shell profile.
+    '''
+    config_dir = Path(click.get_app_dir(APP_NAME))
+    config_dir.mkdir(parents=True, exist_ok=True)
+    config_file = config_dir / 'config'
+
+    try:
+        ec2 = boto3.client('ec2')
+        response = ec2.describe_instances()
+        query = jmespath.search("Reservations[].Instances[].{name: Tags[?Key=='Name'].Value | [0], id: InstanceId}", response)
+    except ClientError as e:
+        click.echo(f'AWS client failed: {e}')
+        click.Abort()
+
+    with config_file.open('a') as writer:
+        for name_id_dict in query:
+            name = name_id_dict['name']
+            inst_id = name_id_dict['id']
+            if ' ' not in name:
+                line = f'export {name}={inst_id} \n'
+                os.environ[name]=inst_id
+                writer.write(line)
+            else:
+                click.echo(f'Found instance name containing whitespace: {name}. Shame on you!')
+    click.echo(f'Wrote instance aliases to {config_file}. Change the aliases as you please.')
+
+    shell = os.environ.get('SHELL')
+
+    if 'bash' in shell:
+        profile = '.bash_profile'
+    elif 'zsh' in shell:
+        profile = '.zshrc'
+    else:
+        click.input()
+        profile = click.prompt('Please enter name of shell config', type=str)
+    shell_config = Path.home() / profile
+
+    # Source the config file in the shell profile.
+    source_line = f'. {str(config_file)}/n'
+
+    if shell_config.exists():
+        if source_line in shell_config.read_text():
+            return
+
+        with shell_config.open(mode='a') as writer:
+            writer.write(source_line)
+    else:
+        click.echo(f'Shell config {shell_config} not found.')
+
+
+@app.command()
+def push_and_sshconfig():
+    pass
+
+
+@click.group()
+def app():
+    # Entry point for CLI.
+    # TODO: Conform AWS permissions here?
+    pass
+
+
 if __name__ == '__main__':
-    scp()
+    app()
