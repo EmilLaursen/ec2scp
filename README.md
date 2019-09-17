@@ -20,5 +20,7 @@ if instance is running ubuntu.
 
 Clone repo and run make build in your favourite environment.
 
+- [] Implement mssh via names and aliases.
+- [] fix issue with non unique names.
 - [x] Handle errors and exceptions!
 - [x] Dry runs to check credentials.
