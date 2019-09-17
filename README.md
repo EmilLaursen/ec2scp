@@ -17,7 +17,7 @@ if instance is running ubuntu.
 
 ## Installation.
 
-Clone repo and run make build in your favourite enviroment.
+Clone repo and run make build in your favourite environment.
 
 
 - [x] Handle errors and exceptions!
