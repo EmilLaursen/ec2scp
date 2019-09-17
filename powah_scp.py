@@ -29,7 +29,8 @@ def app(ctx):
     public_key = Path.home() / '.ssh/id_rsa.pub'
 
     if not public_key.exists():
-        click.ClickException('Rsa key not found. Please generate one with: ssh-keygen -t rsa -f id_rsa.')
+        click.echo('Rsa key not found. Please generate one with: ssh-keygen -t rsa -f id_rsa.')
+        ctx.abort()
 
     public_key = public_key.read_text()
     ctx.obj.public_key = public_key
@@ -74,9 +75,10 @@ def get_instance_info(name=None, inst_id=None, client=None):
 
         kwargs = {'Filters':[{'Name': 'tag:Name', 'Values': [name]}]} if inst_id is None else {'InstanceIds': [inst_id]}
         response = ec2.describe_instances(**kwargs)
-        
+
         if response is None:
-            click.ClickException(f'Failure. No instance with Name: {name}')
+            click.echo(f'Failure. No instance with Name: {name}')
+            click.Abort()
 
         # JMESpath query to extract relevant information.
         query_exp = 'Reservations[0].Instances[0].[InstanceId, ImageId, Placement.AvailabilityZone, PublicIpAddress]'
@@ -175,7 +177,7 @@ def scp(obj, src, dst):
 
     # Push public key for 60 seconds.
     _ = push_ssh_key(instance_info, obj.public_key, client=obj.ec2ic)
-    
+
     args = f'scp -i ~/.ssh/id_rsa {src_path} {dst_path}'
 
     os.system(args)
@@ -190,12 +192,19 @@ def make_config(obj):
         and not their instance id. Aliases are added to a configfile, which
         is sourced in your shell profile.
     '''
+    click.UsageError('STAP')
     ec2 = obj.ec2
     try:
         response = ec2.describe_instances()
-        query = jmespath.search("Reservations[].Instances[].{name: Tags[?Key=='Name'].Value | [0], id: InstanceId}", response)
     except ClientError as e:
         click.ClickException(f'AWS client failed: {e}')
+
+        click.echo(response)
+
+        query = jmespath.search("Reservations[].Instances[].{name: Tags[?Key=='Name'].Value | [0], id: InstanceId}", response)
+        if query is None:
+            click.echo(f'Failure. No instance with Name: {name}')
+            click.Abort()
 
     if obj.cfg is None:
         obj.cfg = {}
