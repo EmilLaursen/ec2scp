@@ -12,6 +12,6 @@ setup(
     ],
     entry_points='''
         [console_scripts]
-        ec2scp=powah_scp:scp
+        ec2scp=powah_scp:app
     ''',
 )
