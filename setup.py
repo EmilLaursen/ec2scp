@@ -1,7 +1,7 @@
 from setuptools import setup, find_packages
 
 setup(
-    name='ec2scp',
+    name='ec2',
     version='0.1',
     py_modules=find_packages(),
     include_package_date=True,
@@ -12,6 +12,6 @@ setup(
     ],
     entry_points='''
         [console_scripts]
-        ec2scp=powah_scp:app
+        ec2=powah_scp:app
     ''',
 )
