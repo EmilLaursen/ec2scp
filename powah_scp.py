@@ -212,15 +212,13 @@ def make_config(obj, edit):
     if query is None:
         return
 
-    click.echo(obj.cfg)
-
     if obj.cfg is None:
         obj.cfg = {}
 
     obj.cfg.update({
         name_id_dict['name']: name_id_dict['id']
         for name_id_dict in query
-        if ' ' not in name_id_dict['name']
+        if name_id_dict['name'] and ' ' not in name_id_dict['name']
     })
 
     json.dump(obj.cfg, obj.config_file.open('w'), indent=4)

@@ -20,7 +20,7 @@ if instance is running ubuntu.
 
 Clone repo and run make build in your favourite environment.
 
-- [] Implement mssh via names and aliases.
+- [] mssh also has msftp, making this tools scp obsolete. Rewrite whole app to be a wrapper around mssh and msftp calls enabling name aliases in a config, instead of just instance-ids.
 - [] fix issue with non unique names.
 - [x] Handle errors and exceptions!
 - [x] Dry runs to check credentials.
