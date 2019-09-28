@@ -60,7 +60,7 @@ def app(ctx):
         try:
             cfg = json.loads(ctx.obj.config_file.read_text())
             ctx.obj.cfg = cfg
-        except json.decoder.JSONDecodeError as e:
+        except json.decoder.JSONDecodeError as _:
             click.launch(str(ctx.obj.config_file))
             raise click.ClickException(f'Your configuration file is invalid JSON. Please fix: {ctx.obj.config_file}')
 
@@ -123,11 +123,11 @@ def push_ssh_key(instance_info, public_key, client=None):
     client = client if client is not None else boto3.client('ec2-instance-connect')
     try:
         resp = client.send_ssh_public_key(
-        InstanceId=instance_info['id'],
-        InstanceOSUser=instance_info['user'],
-        SSHPublicKey=public_key,
-        AvailabilityZone=instance_info['avz'],
-    )
+            InstanceId=instance_info['id'],
+            InstanceOSUser=instance_info['user'],
+            SSHPublicKey=public_key,
+            AvailabilityZone=instance_info['avz'],
+        )
     except ClientError as e:
         raise click.ClickException(f'{e}')
     return resp
@@ -148,11 +148,11 @@ def resolve_instance_info_and_paths(src, dst, obj):
 
     # Is name from config, or actual instance name?
     if obj.cfg is not None:
-        instance_id = obj.cfg.get(identifier)
+        instance = obj.cfg.get(identifier)
 
         # name found in config - overwrite identifier with associated instance_id.
-        if instance_id is not None:
-            identifier = instance_id
+        if instance is not None:
+            identifier = instance['id']
             name_used = False
         else:
             raise click.ClickException('given instance name not found in config.')
@@ -196,10 +196,34 @@ def scp(obj, src, dst):
 
 
 @app.command()
+@click.argument('name', type=click.STRING)
+@click.pass_obj
+def iid(obj, name):
+    # Is name from config, or actual instance name?
+    if obj.cfg is not None:
+        # name found in config
+        if obj.cfg.get(name) is not None:
+            instance = obj.cfg.get(name)
+            output = f'{instance["user"]}@{instance["id"]}'
+        else:
+            instance_info = get_instance_info(name=name, inst_id=None)
+            output = f'{instance_info["user"]}@{instance_info["id"]}'
+
+    click.echo(output)
+
+
+@app.command()
+@click.argument('name', type=click.STRING)
+@click.pass_obj
+def ssh(obj, name):
+    pass
+
+
+@app.command()
 @click.option('--edit', '-e', is_flag=True, help='Launch config file in editor.')
 @click.pass_obj
 def make_config(obj, edit):
-    ''' Usage: ec2 make_config --edit'''
+    ''' Usage: ec2 make_config --edit '''
     ec2 = obj.ec2
     
     try:
@@ -215,8 +239,10 @@ def make_config(obj, edit):
     if obj.cfg is None:
         obj.cfg = {}
 
+    user_id_dict = lambda dic: {k: v for k,v in dic.items() if k in ['user', 'id']} 
+
     obj.cfg.update({
-        name_id_dict['name']: name_id_dict['id']
+        name_id_dict['name']: user_id_dict(name_id_dict)
         for name_id_dict in query
         if name_id_dict['name'] and ' ' not in name_id_dict['name']
     })
@@ -228,6 +254,16 @@ def make_config(obj, edit):
     else:
         click.echo(f'Wrote instance aliases to {obj.config_file}. Change the aliases as you please.')
 
+
+def cfg_lookup(obj, name: str):
+    # TODO: Finish this. Figure out role for this function.
+    if obj.cfg is not None:
+        instance = obj.cfg.get(name)
+
+        # Name found in config:
+        if instance is not None:
+            identifier = instance['id']
+            pass
 
 @app.command()
 @click.argument('identifier', type=click.STRING)
@@ -241,11 +277,11 @@ def push(obj, identifier):
 
     # Is name from config, or actual instance name?
     if obj.cfg is not None:
-        instance_id = obj.cfg.get(identifier)
+        instance = obj.cfg.get(identifier)
 
         # name found in config - overwrite identifier with associated instance_id.
-        if instance_id is not None:
-            identifier = instance_id
+        if instance is not None:
+            identifier = instance['id']
             name_used = False
         else:
             raise click.ClickException('name not found in cfg.')
