@@ -267,14 +267,15 @@ def sftp(obj: EmptyObj, name: str):
     # Call msftp with correct os_user and instance id.
     os.system(f'msftp {inst_info["os_user"]}@{inst_info["id"]}') 
 
-
-def _ami_to_osuser(ami_desc: str):
-    if 'Ubuntu' in ami_desc:
-        return 'ubuntu'
-    elif 'Windows' in ami_desc:
-        return 'win'
+    
+def _osuser_from_ami(ami_info):
+    if 'ubuntu' in ami_info['name'].lower() or 'ubuntu' in ami_info['loc'].lower():
+        os_user = 'ubuntu'
+    elif 'amzn2' in ami_info['name'].lower() or 'amzn2' in ami_info['loc'].lower():
+        os_user = 'ec2-user'
     else:
-        return 'ec2-user'
+        os_user = None
+    return os_user
 
 
 @app.command()
@@ -294,28 +295,41 @@ def make_config(obj: EmptyObj, edit: bool):
     if inst_dict is None:
         return
 
-    has_name, no_name = partition(lambda dic: dic.get('name') is None, inst_dict)
+    has_name, no_name = partition(lambda dic: dic.get('name') is None or dic.get('name') == '', inst_dict)
 
     no_whitespace, whitespace = partition(lambda dic: ' ' in dic.get('name'), has_name)
     no_whitespace = list(no_whitespace)
 
     if list(no_name):
-        click.ClickException('Warning: Unamed instances are ignored.')
+        click.echo('Warning: Unamed instances are ignored.')
 
     if list(whitespace):
-        click.ClickException('Warning: Instances with whitespace in their names are ignored.')
+        click.echo('Warning: Instances with whitespace in their names are ignored.')
 
     try:
         response2 = ec2.describe_images(ImageIds=[inst.get('ami') for inst in no_whitespace])
     except ClientError as e:
         raise click.ClickException(f'AWS client failed: {e}')
-
-    ami_query = jmespath.search('Images[].Description', response2)
+        
+    ami_query = jmespath.search('Images[].{id: ImageId, name: Name, loc: ImageLocation}', response2)
+    ami_query = {
+        ami_dic['id']: ami_dic
+        for ami_dic in ami_query
+    }
+    
 
     inst_dics = []
-    for inst_dic, os_user in zip(no_whitespace, map(_ami_to_osuser, ami_query)):
+    for inst_dic in no_whitespace:
+
+        ami = inst_dic['ami']
+
+        ami_info = ami_query.get(ami)
+
+        os_user = _osuser_from_ami(ami_info)
+
         inst_dic['os_user'] = os_user
         inst_dics.append(inst_dic)
+
 
     if obj.cfg is None:
         obj.cfg = {}
