@@ -107,13 +107,15 @@ def get_instance_info(name=None, inst_id=None, client=None):
         response = ec2.describe_instances(**kwargs)
 
         # JMESpath query to extract relevant information.
-        query_exp = "Reservations[0].Instances[0].[InstanceId, ImageId, Placement.AvailabilityZone, PublicIpAddress]"
-        result = jmespath.search(query_exp, response)
+        result = jmespath.search(
+            "Reservations[0].Instances[0].[InstanceId, ImageId, Placement.AvailabilityZone, PublicIpAddress]",
+            response,
+        )
 
         if result is None:
             raise click.ClickException(f"Failure. No instance with Name: {name}")
 
-        d = {key: val for key, val in zip(["id", "ami", "avz", "ip"], result)}
+        d = dict(zip(["id", "ami", "avz", "ip"], result))
 
         # Find OS user. ubuntu or ec2-user
         response2 = ec2.describe_images(ImageIds=[d["ami"]])
