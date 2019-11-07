@@ -2,31 +2,28 @@ import boto3
 from botocore.exceptions import ClientError
 import click
 
+from common.aws import (
+    get_instance_info,
+    resolve_instance_info_and_paths,
+    valid_available_instances,
+    retrieve_os_users,
+)
+
+from common.config import update_config, load_config
+
 import os
 import json
-import re
-from itertools import tee, filterfalse
 
 # Learn about the amazing query language for json structures.
 # http://jmespath.org/tutorial.html
-import jmespath
 from pathlib import Path
 
-# Instance ID's are either 8 or 17 characters long, after the i- part.
-INST_ID_REGEX = r"(^i-(\w{17}|\w{8}))\W(.+)"
 
 APP_NAME = "ec2"
 
 
 class EmptyObj:
     pass
-
-
-def partition(pred, iterable):
-    "Use a predicate to partition entries into false entries and true entries"
-    # partition(is_odd, range(10)) --> 0 2 4 6 8   and  1 3 5 7 9
-    t1, t2 = tee(iterable)
-    return filterfalse(pred, t1), filter(pred, t2)
 
 
 @click.group()
@@ -54,83 +51,31 @@ def app(ctx):
     ctx.obj.public_key = public_key
 
     # Load custom config.
-    config_dir = Path(click.get_app_dir(APP_NAME))
-    config_dir.mkdir(parents=True, exist_ok=True)
-
-    ctx.obj.config_file = config_dir / "config"
-    ctx.obj.cfg = None
-    if ctx.obj.config_file.exists():
-        try:
-            cfg = json.loads(ctx.obj.config_file.read_text())
-            ctx.obj.cfg = cfg
-        except json.decoder.JSONDecodeError:
-            click.launch(str(ctx.obj.config_file))
-            raise click.ClickException(
-                f"Your configuration file is invalid JSON. Please fix: {ctx.obj.config_file}"
-            )
+    try:
+        cfg, config_file = load_config(Path(click.get_app_dir(APP_NAME)))
+    except json.decoder.JSONDecodeError:
+        raise click.ClickException(
+            f"Your configuration file is invalid JSON. Please fix: {ctx.obj.config_file}"
+        )
 
     # Confirm AWS credentials.
-    ec2 = boto3.client("ec2")
-    ctx.obj.ec2 = ec2
-    ec2ic = boto3.client("ec2-instance-connect")
-    ctx.obj.ec2ic = ec2ic
+    ctx.obj.ec2 = boto3.client("ec2")
+    ctx.obj.ec2ic = boto3.client("ec2-instance-connect")
 
     try:
-        _ = ec2.describe_instances(DryRun=True)
+        _ = ctx.obj.ec2.describe_instances(DryRun=True)
     except ClientError as e:
         if "DryRunOperation" not in str(e):
             raise click.ClickException(
                 "Failure. Your AWS credentials do not authorize: describe_instances"
             )
     try:
-        _ = ec2.describe_images(DryRun=True)
+        _ = ctx.obj.ec2.describe_images(DryRun=True)
     except ClientError as e:
         if "DryRunOperation" not in str(e):
             raise click.ClickException(
                 "Failure. Your AWS credentials do not authorize: describe_images"
             )
-
-
-def get_instance_info(name=None, inst_id=None, client=None):
-
-    if name is None and inst_id is None:
-        raise TypeError("Both name and inst_id can not be None.")
-
-    try:
-        ec2 = client if client is not None else boto3.client("ec2")
-
-        kwargs = (
-            {"Filters": [{"Name": "tag:Name", "Values": [name]}]}
-            if inst_id is None
-            else {"InstanceIds": [inst_id]}
-        )
-        response = ec2.describe_instances(**kwargs)
-
-        # JMESpath query to extract relevant information.
-        result = jmespath.search(
-            "Reservations[0].Instances[0].[InstanceId, ImageId, Placement.AvailabilityZone, PublicIpAddress]",
-            response,
-        )
-
-        if result is None:
-            raise click.ClickException(f"Failure. No instance with Name: {name}")
-
-        d = dict(zip(["id", "ami", "avz", "ip"], result))
-
-        # Find OS user. ubuntu or ec2-user
-        response2 = ec2.describe_images(ImageIds=[d["ami"]])
-
-        image_desc = jmespath.search("Images[*].Description", response2)[0]
-
-        if "Windows" in image_desc:
-            raise click.ClickException("EC2 instance is running windows.")
-
-        os_user = "ubuntu" if "Ubuntu" in image_desc else "ec2-user"
-    except ClientError as e:
-        raise click.ClickException(f"AWS client failed: {e}")
-
-    d.update({"os_user": os_user})
-    return d
 
 
 def push_ssh_key(instance_info, public_key, client=None):
@@ -147,48 +92,20 @@ def push_ssh_key(instance_info, public_key, client=None):
     return resp
 
 
-def resolve_instance_info_and_paths(src, dst, obj):
-    client = obj.ec2
+def lookup_instance_name(obj, name):
+    instance_info = obj.cfg.get(name)
 
-    # Figure out which one refers to the remote server.
-    src_is_remote = ":" in src
-    remote_path = src if src_is_remote else dst
+    if instance_info is None:
 
-    match = re.match(INST_ID_REGEX, remote_path)
-    # Did caller use an instance-id or instance name to refer to remote?
-    name_used = match is None
+        click.echo("Not found in config. Consider running make-config.")
 
-    identifier, path = tuple(remote_path.split(sep=":"))
+        instance_info = get_instance_info(name=name, inst_id=None)
 
-    # Is name from config, or actual instance name?
-    if obj.cfg is not None:
-        instance = obj.cfg.get(identifier)
+        update_config(obj.cfg, instance_info)
 
-        # name found in config - overwrite identifier with associated instance_id.
-        if instance is not None:
-            identifier = instance["id"]
-            name_used = False
-        else:
-            raise click.ClickException("given instance name not found in config.")
-
-    # Retrieve all instance information based on name or instance-id.
-    kwargs = {"name" if name_used else "inst_id": identifier, "client": client}
-    inst_info = get_instance_info(**kwargs)
-
-    # If remote path is relative, fix it to remote's home folder.
-    if not Path(path).is_absolute():
-        path = str(Path("/home/") / inst_info["user"] / path)
-    # Actual remote address used in scp call.
-    remotehost_prefix = f'{ inst_info["user"] }@{ inst_info["ip"] }:'
-
-    if src_is_remote:
-        src_path = remotehost_prefix + path
-        dst_path = dst
-    else:
-        src_path = src
-        dst_path = remotehost_prefix + path
-
-    return inst_info, src_path, dst_path
+        if instance_info is None:
+            raise click.ClickException("Instance not found")
+    return instance_info
 
 
 @app.command()
@@ -196,15 +113,15 @@ def resolve_instance_info_and_paths(src, dst, obj):
 @click.argument("dst", type=click.STRING)
 @click.pass_obj
 def scp(obj, src, dst):
-    """ 
+    """
         \b
         Use SCP to upload files to EC2 instances using aws IAM credentials instead of ssh keys.
         Usage:
             upload:       ec2 scp source_file INSTANCE-ID:dest_file
             download:     ec2 scp INSTANCE-NAME:source_file dest_file
-        
+
         Instances can be referenced by instance id or Name. Setup a configuration file and edit it, to give custom aliases to your instances.
-        
+
         \b
         You can use relative paths on the remote. Thus
             ec2 scp t.txt NAME:file.txt
@@ -245,19 +162,10 @@ def iid(obj: EmptyObj, name: str):
 @click.pass_obj
 def ssh(obj: EmptyObj, name: str):
     """ Usage: ec2 ssh INSTANCE-NAME to use EC2 instance connect to ssh to instance."""
-    inst_info = obj.cfg.get(name)
-
-    if inst_info is None:
-
-        click.echo("Not found in config. Consider running make-config.")
-
-        inst_info = get_instance_info(name=name, inst_id=None)
-
-        if inst_info is None:
-            raise click.ClickException("Instance not found")
+    instance_info = lookup_instance_name(obj, name)
 
     # Call mssh with correct os_user and instance id.
-    os.system(f'mssh {inst_info["os_user"]}@{inst_info["id"]}')
+    os.system(f'mssh {instance_info["os_user"]}@{instance_info["id"]}')
 
 
 @app.command()
@@ -265,29 +173,45 @@ def ssh(obj: EmptyObj, name: str):
 @click.pass_obj
 def sftp(obj: EmptyObj, name: str):
     """ Usage: ec2 sftp INSTANCE-NAME to use EC2 instance connect to sftp to instance."""
-    inst_info = obj.cfg.get(name)
-
-    if inst_info is None:
-
-        click.echo("Not found in config. Consider running make-config.")
-
-        inst_info = get_instance_info(name=name, inst_id=None)
-
-        if inst_info is None:
-            raise click.ClickException("Instance not found")
+    instance_info = lookup_instance_name(obj, name)
 
     # Call msftp with correct os_user and instance id.
-    os.system(f'msftp {inst_info["os_user"]}@{inst_info["id"]}')
+    os.system(f'msftp {instance_info["os_user"]}@{instance_info["id"]}')
 
 
-def _osuser_from_ami(ami_info):
-    if "ubuntu" in ami_info["name"].lower() or "ubuntu" in ami_info["loc"].lower():
-        os_user = "ubuntu"
-    elif "amzn2" in ami_info["name"].lower() or "amzn2" in ami_info["loc"].lower():
-        os_user = "ec2-user"
-    else:
-        os_user = None
-    return os_user
+@app.command()
+@click.argument("name", type=click.STRING)
+@click.pass_obj
+def setup_remote_dev(obj, name):
+    if not obj.public_key:
+        click.ClickException(
+            "Rsa key not found. Please generate one with: ssh-keygen -t rsa -f ~/.ssh/id_rsa. Must be PEM format."
+        )
+
+    instance_info = lookup_instance_name(obj, name)
+
+    ssh_config = Path.home() / ".ssh/config"
+
+    entry_exists = any(
+        instance_info["id"] in line for line in ssh_config.read_text().split("\n")
+    )
+
+    if entry_exists:
+        return
+
+    remote_auth_file = f"/home/{instance_info['os_user']}/.ssh/authorized_keys"
+
+    args = f"echo 'echo {obj.public_key} >> {remote_auth_file}' | mssh {instance_info['os_user']}@{instance_info['id']}"
+
+    ec2_entry = f"""Host {instance_info['id']}
+    HostName {instance_info['ip']}
+    User {instance_info['os_user']}
+    Port 22
+    IdentityFile {Path.home() / '.ssh/id_rsa'}
+    """
+
+    with ssh_config.open(mode="a") as file:
+        file.write(f"\n{ec2_entry}\n")
 
 
 @app.command()
@@ -298,59 +222,30 @@ def make_config(obj: EmptyObj, edit: bool):
     ec2 = obj.ec2
 
     try:
-        response = ec2.describe_instances()
+        valid_instances, invalid_instances = valid_available_instances(ec2)
+
     except ClientError as e:
         raise click.ClickException(f"AWS client failed: {e}")
 
-    inst_dict = jmespath.search(
-        "Reservations[].Instances[].{name: Tags[?Key=='Name'].Value | [0], id: InstanceId, avz: Placement.AvailabilityZone, ami: ImageId}",
-        response,
-    )
-
-    if inst_dict is None:
-        return
-
-    has_name, no_name = partition(
-        lambda dic: dic.get("name") is None or dic.get("name") == "", inst_dict
-    )
-
-    no_whitespace, whitespace = partition(lambda dic: " " in dic.get("name"), has_name)
-    no_whitespace = list(no_whitespace)
-
-    if list(no_name):
-        click.echo("Warning: Unamed instances are ignored.")
-
-    if list(whitespace):
-        click.echo("Warning: Instances with whitespace in their names are ignored.")
+    if invalid_instances:
+        click.echo(
+            "Warning: Unamed instances, and instances with whitespace in their names, are ignored."
+        )
 
     try:
-        response2 = ec2.describe_images(
-            ImageIds=[inst.get("ami") for inst in no_whitespace]
-        )
+        instance_dics = retrieve_os_users(ec2, valid_instances)
+
     except ClientError as e:
         raise click.ClickException(f"AWS client failed: {e}")
 
-    ami_query = jmespath.search(
-        "Images[].{id: ImageId, name: Name, loc: ImageLocation}", response2
-    )
-    ami_query = {ami_dic["id"]: ami_dic for ami_dic in ami_query}
-
-    inst_dics = []
-    for inst_dic in no_whitespace:
-
-        ami = inst_dic["ami"]
-
-        ami_info = ami_query.get(ami)
-
-        os_user = _osuser_from_ami(ami_info)
-
-        inst_dic["os_user"] = os_user
-        inst_dics.append(inst_dic)
+    update_config(obj, instance_dics)
 
     if obj.cfg is None:
         obj.cfg = {}
 
-    obj.cfg.update({inst_dic["name"]: inst_dic for inst_dic in inst_dics})
+    obj.cfg.update(
+        {instance_dic["name"]: instance_dic for instance_dic in instance_dics}
+    )
 
     json.dump(obj.cfg, obj.config_file.open("w"), indent=4)
 
@@ -360,37 +255,6 @@ def make_config(obj: EmptyObj, edit: bool):
         click.echo(
             f"Wrote instance aliases to {obj.config_file}. Change the aliases as you please."
         )
-
-
-@app.command()
-@click.argument("identifier", type=click.STRING)
-@click.pass_obj
-def push(obj, identifier):
-    """ Usage: push ID, where ID is an instance id or instance Name."""
-    match = re.match(INST_ID_REGEX, identifier)
-
-    # Did caller use an instance-id or instance name?
-    name_used = match is None
-
-    # Is name from config, or actual instance name?
-    if obj.cfg is not None:
-        instance = obj.cfg.get(identifier)
-
-        # name found in config - overwrite identifier with associated instance_id.
-        if instance is not None:
-            identifier = instance["id"]
-            name_used = False
-        else:
-            raise click.ClickException("name not found in cfg.")
-
-    # Retrieve all instance information based on name or instance-id.
-    inst_info = (
-        get_instance_info(name=identifier)
-        if name_used
-        else get_instance_info(inst_id=identifier)
-    )
-
-    _ = push_ssh_key(inst_info, obj.public_key)
 
 
 if __name__ == "__main__":
