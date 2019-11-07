@@ -52,7 +52,7 @@ def app(ctx):
 
     # Load custom config.
     try:
-        cfg, config_file = load_config(Path(click.get_app_dir(APP_NAME)))
+        ctx.obj.cfg, ctx.obj.config_file = load_config(Path(click.get_app_dir(APP_NAME)))
     except json.decoder.JSONDecodeError:
         raise click.ClickException(
             f"Your configuration file is invalid JSON. Please fix: {ctx.obj.config_file}"
