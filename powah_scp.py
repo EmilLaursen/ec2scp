@@ -55,7 +55,7 @@ def app(ctx):
         ctx.obj.cfg, ctx.obj.config_file = load_config(Path(click.get_app_dir(APP_NAME)))
     except json.decoder.JSONDecodeError:
         raise click.ClickException(
-            f"Your configuration file is invalid JSON. Please fix: {ctx.obj.config_file}"
+            f"Your configuration file is invalid JSON. Please fix: {Path(click.get_app_dir(APP_NAME))}"
         )
 
     # Confirm AWS credentials.
@@ -193,7 +193,7 @@ def setup_remote_dev(obj, name):
     ssh_config = Path.home() / ".ssh/config"
 
     entry_exists = any(
-        instance_info["id"] in line for line in ssh_config.read_text().split("\n")
+        name in line for line in ssh_config.read_text().split("\n")
     )
 
     if entry_exists:
@@ -201,9 +201,13 @@ def setup_remote_dev(obj, name):
 
     remote_auth_file = f"/home/{instance_info['os_user']}/.ssh/authorized_keys"
 
-    args = f"echo 'echo {obj.public_key} >> {remote_auth_file}' | mssh {instance_info['os_user']}@{instance_info['id']}"
+    args = f'echo "echo \'{obj.public_key}\' >> \'{remote_auth_file}\'" | mssh {instance_info["os_user"]}@{instance_info["id"]}'
 
-    ec2_entry = f"""Host {instance_info['id']}
+    click.echo(args)
+
+    os.system(args)
+
+    ec2_entry = f"""Host {name}
     HostName {instance_info['ip']}
     User {instance_info['os_user']}
     Port 22

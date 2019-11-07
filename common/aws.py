@@ -109,7 +109,7 @@ def valid_available_instances(client):
     ec2 = client
 
     inst_dict = jmespath.search(
-        "Reservations[].Instances[].{name: Tags[?Key=='Name'].Value | [0], id: InstanceId, avz: Placement.AvailabilityZone, ami: ImageId}",
+        "Reservations[].Instances[].{name: Tags[?Key=='Name'].Value | [0], id: InstanceId, avz: Placement.AvailabilityZone, ami: ImageId, ip: PublicIpAddress}",
         ec2.describe_instances(),
     )
 
@@ -124,7 +124,7 @@ def valid_available_instances(client):
 
     valid_instances = list(no_whitespace)
 
-    invalid_instances = set(whitespace) | set(no_name)
+    invalid_instances = list(whitespace) + list(no_name)
 
     return valid_instances, invalid_instances
 

@@ -11,12 +11,12 @@ def load_config(config_dir: Path):
 
     config_file = config_dir / "config"
 
-    cfg = None
+    cfg = {}
 
     if config_file.exists():
         cfg = json.loads(config_file.read_text())
     else:
-        config_file.touch()
+        config_file.write_text('{}')
 
     return cfg, config_file
 
