@@ -222,7 +222,7 @@ def setup_remote_dev(obj, name):
 @click.option("--edit", "-e", is_flag=True, help="Launch config file in editor.")
 @click.pass_obj
 def make_config(obj: EmptyObj, edit: bool):
-    """ Usage: ec2 make_config --edit """
+    """ Usage: ec2 make-config --edit """
     ec2 = obj.ec2
 
     try:
