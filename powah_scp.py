@@ -127,7 +127,7 @@ def scp(obj, src, dst):
             ec2 scp t.txt NAME:file.txt
         is equivalent to
             ec2 scp t.txt NAME:/home/ubuntu/file.txt
-        if instance is running ubuntu. 
+        if instance is running ubuntu.
     """
     instance_info, src_path, dst_path = resolve_instance_info_and_paths(src, dst, obj)
 
@@ -211,11 +211,10 @@ def setup_remote_dev(obj, name):
     HostName {instance_info['ip']}
     User {instance_info['os_user']}
     Port 22
-    IdentityFile {Path.home() / '.ssh/id_rsa'}
-    """
+    IdentityFile {Path.home() / '.ssh/id_rsa'}"""
 
     with ssh_config.open(mode="a") as file:
-        file.write(f"\n{ec2_entry}\n")
+        file.write(f"{ec2_entry}\n")
 
 
 @app.command()

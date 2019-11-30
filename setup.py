@@ -6,7 +6,7 @@ setup(
     py_modules=find_packages(),
     include_package_date=True,
     python_requires=">=3.5",
-    install_requires=["Click", "boto3"],
+    install_requires=["Click", "boto3", "ec2instanceconnectcli"],
     entry_points="""
         [console_scripts]
         ec2=powah_scp:app
