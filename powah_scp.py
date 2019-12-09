@@ -192,12 +192,14 @@ def setup_remote_dev(obj, name):
 
     ssh_config = Path.home() / ".ssh/config"
 
-    entry_exists = any(
-        name in line for line in ssh_config.read_text().split("\n")
-    )
+    if ssh_config.exists():
 
-    if entry_exists:
-        return
+        entry_exists = any(
+            name in line for line in ssh_config.read_text().split("\n")
+        )
+
+        if entry_exists:
+            return
 
     remote_auth_file = f"/home/{instance_info['os_user']}/.ssh/authorized_keys"
 
