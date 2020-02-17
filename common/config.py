@@ -3,31 +3,51 @@ import json
 
 from collections import Iterable
 
+from common.ssh import SshPublicKey, PublicKeyNotFound
 
-def load_config(config_dir: Path):
-    # Load custom config.
-
-    config_dir.mkdir(parents=True, exist_ok=True)
-
-    config_file = config_dir / "config"
-
-    cfg = {}
-
-    if config_file.exists():
-        cfg = json.loads(config_file.read_text())
-    else:
-        config_file.write_text('{}')
-
-    return cfg, config_file
+from typing import List, Union
 
 
-def update_config(obj, instance_dics=None):
-    if instance_dics is not None:
-        if isinstance(instance_dics, Iterable):
-            obj.cfg.update(
-                {instance_dic["name"]: instance_dic for instance_dic in instance_dics}
-            )
+class Ec2Config:
+    def __init__(self, config_dir: Path):
+        self.config_dir = config_dir
+        self.config_dir.mkdir(parents=True, exist_ok=True)
+        self.config_file = config_dir / "config"
+        self.cfg = {}
+
+        self.publickey_path = self.config_dir / "keypath"
+
+    def load(self) -> None:
+        if self.config_file.exists():
+            self.cfg = json.loads(self.config_file.read_text())
         else:
-            obj.cfg.update(instance_dics)
+            self.config_file.write_text("{}")
 
-    json.dump(obj.cfg, obj.config_file.open("w"), indent=4)
+    def save(self) -> None:
+        self.config_file.write_text(json.dumps(self.cfg, indent=3))
+
+    def lookup_instance(self, name: str = None, *args) -> Union[dict, None]:
+        return self.cfg.get(name)
+
+    def update(self, instance_dicts: Union[dict, List[dict]]) -> None:
+        if isinstance(instance_dicts, dict):
+            instance_dicts = [instance_dicts]
+
+        self.cfg.update(
+            {
+                instance_dic.get("Tags", {}).get("Name"): instance_dic
+                for instance_dic in instance_dicts
+            }
+        )
+        self.save()
+
+    def lookup_publickey(self):
+        path = None
+        if self.publickey_path.exists():
+            path = Path(self.publickey_path.read_text())
+        key = SshPublicKey(path=path)
+        return key.as_text()
+
+
+class InstanceInfo:
+    pass
