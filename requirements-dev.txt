@@ -2,3 +2,5 @@ jq==0.1.6
 Click
 boto3
 ec2instanceconnectcli
+pytest
+hypothesis

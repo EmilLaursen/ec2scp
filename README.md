@@ -1,31 +1,18 @@
 # AWS EC2 scp CLI
 
-Wrapper around the EC2 instance connect CLI tools, mssh and msftp, which
- enables using instance names instead of instance ids. E.g. with an instance
- named 'api' with instance id 'i-jadksafkj4rk3desf' you can execute
+The AWS CLI, [EC2 Instance connect](https://github.com/aws/aws-ec2-instance-connect-cli), is a convenient tool for managing access to EC2 instances without any SSH keys, but through IAM credentials instead. However, a major nuisance is the fact that you have to use the instance ID to connect to an instance.
+
+This tool makes it possible for you to use the instance Name tag, which you choose yourself.
+E.g. with an instance named 'api' with instance id 'i-jadksafkj4rk3desf' you can execute
  ``` ec2 ssh api```
- instead of mssh ubuntu@i-jadksafkj4rk3desf or mssh ec2-user@i-jadksafkj4rk3desf,
- and likewise for msftp.
-
- Additional subcommands are available. For instance it is possible to use scp,
- by pushing your local rsa key to the instance for 60 seconds, using boto3, and
- then executing the scp command. Again it is possible to use instance names or instance ids,
- istead of the public DNS/ip of the instance, as is usually required by scp.
-
-Use SCP to upload files to EC2 instances using aws IAM credentials instead of ssh keys.
-Upload sample:
-``` ec2 scp source_file INSTANCE-ID:dest_file ```
-Download sample:
-``` ec2 scp INSTANCE-NAME:source_file dest_file```
- 
-Instances can be referenced by instance id or Name. Setup a configuration file and edit it, to give custom aliases to your instances.
+ instead of mssh ubuntu@i-jadksafkj4rk3desf or mssh ec2-user@i-jadksafkj4rk3desf, and likewise for msftp. The tool will figure out the correct instance-id from the given name, and also the 
+ correct OS-user (say ubuntu or ec2-user for Amazon Linux 2).
 
 
-You can use relative paths on the remote. Thus
-```    ec2 scp t.txt NAME:file.txt```
-is equivalent to
-```    ec2 scp t.txt NAME:/home/ubuntu/file.txt```
-if instance is running ubuntu. 
+# Remote VScode development on EC2 instances.
+ Unfortunately, the SSH Remote Development feature of VScode does not work with EC2 Instance Connect. Therefore, there is an subcommand to upload your SSH key to the server and setup your SSH config with instance information.
+ ``` ec2 setup-remote api```
+ Then simply launch SSH Remote from VScode and choose your instance.
 
 ## Installation.
 
