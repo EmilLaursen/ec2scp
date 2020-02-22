@@ -20,11 +20,12 @@ Clone repo and run make build in your favourite environment.
 
 # TODO:
 
-- [] fix issue with non unique names.
+- [ ] handle instance reboots (possible new ip!) for ssh config
+- [ ] add entrypoint to wipe vscode server on remote host (vscode updates sometimes makes host server version incompatible).
+- [ ] interface should be somewhat stable, implement unit tests.
+- [ ] Handle different aws profiles more gracefully.
+- [x] fix issue with non unique names.
 - [x] mssh also has msftp, making the scp subcommand somewhat obsolete. Rewrite whole app to be a wrapper around mssh and msftp calls enabling name aliases in a config, instead of just instance-ids.
 - [x] Handle errors and exceptions!
 - [x] Dry runs to check credentials.
-- [ ] implement simple parser for ssh configs.
-- [ ] handle instance reboots (possible new ip!) for ssh config
-- [ ] add entrypoint to wipe vscode server on remote host (vscode updates sometimes makes host server version incompatible).
-- [ ] rewrite readme. the project has changed direction completely.
+- [x] implement rudimentary parser for ssh configs.
