@@ -70,6 +70,7 @@ Host proxyus
 
 cfg = Path("/home/emilime/.ssh/config")
 
+
 @pytest.fixture
 def sshsimpleparser():
     simple = SshSimpleParser()

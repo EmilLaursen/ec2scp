@@ -15,8 +15,6 @@ class Ec2Config:
         self.config_file = config_dir / "config"
         self.cfg = {}
 
-        self.publickey_path = self.config_dir / "keypath"
-
     def load(self) -> None:
         if self.config_file.exists():
             self.cfg = json.loads(self.config_file.read_text())
@@ -40,13 +38,6 @@ class Ec2Config:
             }
         )
         self.save()
-
-    def lookup_publickey(self):
-        path = None
-        if self.publickey_path.exists():
-            path = Path(self.publickey_path.read_text())
-        key = SshPublicKey(path=path)
-        return key.as_text()
 
 
 class InstanceInfo:

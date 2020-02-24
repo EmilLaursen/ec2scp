@@ -4,13 +4,8 @@ from pathlib import Path
 import boto3
 from botocore.exceptions import ClientError
 import click
-
-
-from common.aws import (
-    query_aws_for_instance_info,
-    InvalidEc2Instances,
-)
-from common.ssh import SshPublicKey, PublicKeyNotFound
+from common.aws import query_aws_for_instance_info
+from common.ssh import SshPublicKey, PublicKeyNotFound, SshSimpleParser
 from common.config import Ec2Config
 
 
@@ -34,13 +29,6 @@ def app(ctx):
     except json.decoder.JSONDecodeError as e:
         raise click.ClickException(
             f"Your configuration file is invalid JSON. Please fix: {ctx.obj.config_dir}"
-        )
-
-    try:
-        ctx.obj.public_key = ctx.obj.lookup_publickey()
-    except PublicKeyNotFound as e:
-        click.echo(
-            "Rsa key not found. Please generate one with: ssh-keygen -t rsa -f ~/.ssh/id_rsa. Some commands will be unavailable."
         )
 
     # Confirm AWS credentials.
@@ -95,44 +83,45 @@ def sftp(obj: Ec2Config, name: str) -> None:
 
 @app.command()
 @click.argument("name", type=click.STRING)
+@click.option("--public_key", "--pk", type=click.STRING, default="id_rsa.pub")
+@click.option("--port", "--p", type=click.INT, default=22)
 @click.pass_obj
-def setup_remote_dev(obj: Ec2Config, name: str) -> None:
-    if not obj.public_key:
-        click.ClickException(
-            "Rsa key not found. Please generate one with: ssh-keygen -t rsa -f ~/.ssh/id_rsa. Must be PEM format."
-        )
+def setup_remote_dev(obj: Ec2Config, name, public_key, port) -> None:
+    """ Upload host publickey to remote EC2 instance's authorized keys
+        and update local ssh config with instance information.
+        ssh INSTANCE_NAME
+        and therefore SSH Remote development through Vscode.
+    """
+    key_path = Path.home() / ".ssh" / public_key
+    try:
+        key_text = SshPublicKey(path=key_path).as_text()
+    except PublicKeyNotFound as e:
+        raise click.ClickException(str(e))
 
     instance_info = lookup_instance_name(obj, name)
-    ssh_config = Path.home() / ".ssh/config"
-    if ssh_config.exists():
 
-        entry_exists = any(name in line for line in ssh_config.read_text().split("\n"))
-
-        if entry_exists:
-            return
+    ssh_config = SshSimpleParser(Path.home() / ".ssh/config")
+    ssh_config.update_entry(
+        instance_id=instance_info["InstanceId"],
+        launch_date=instance_info["LaunchTime"],
+        host=instance_info["Tags"]["Name"],
+        hostname=instance_info["PublicIpAddress"],
+        user=instance_info["OsUser"],
+        port=str(port),
+        public_key_path=key_path,
+    )
 
     remote_auth_file = f"/home/{instance_info['OsUser']}/.ssh/authorized_keys"
 
-    args = f'echo "echo \'{obj.public_key}\' >> \'{remote_auth_file}\'" | mssh {instance_info["OsUser"]}@{instance_info["id"]}'
-
+    args = f'echo "echo \'{key_text}\' >> \'{remote_auth_file}\'" | mssh {instance_info["OsUser"]}@{instance_info["InstanceId"]}'
     click.echo(args)
-
     os.system(args)
-
-    ec2_entry = f"""Host {name}
-    HostName {instance_info['ip']}
-    User {instance_info['OsUser']}
-    Port 22
-    IdentityFile {Path.home() / '.ssh/id_rsa'}"""
-
-    with ssh_config.open(mode="a") as file:
-        file.write(f"{ec2_entry}\n")
 
 
 @app.command()
 @click.pass_obj
 def config(obj: Ec2Config) -> None:
-    """ Open config file in editor. """
+    """ Open config in editor. """
     click.launch(str(obj.config_file))
 
 
